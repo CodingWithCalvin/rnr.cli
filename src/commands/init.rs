@@ -38,6 +38,15 @@ pub fn run(args: &InitArgs) -> Result<()> {
         return Ok(());
     }
 
+    // Error if not at git repo root
+    if !is_git_repo_root()? {
+        bail!(
+            "This directory does not appear to be a git repository root.\n\
+             rnr must be initialized at the root of a git repository.\n\
+             Please run 'rnr init' from the directory containing your .git folder."
+        );
+    }
+
     // Determine platforms to install
     let platforms = select_platforms(args)?;
 
@@ -47,6 +56,13 @@ pub fn run(args: &InitArgs) -> Result<()> {
 
     // Perform initialization
     initialize(&platforms)
+}
+
+/// Check if the current directory is a git repository root
+fn is_git_repo_root() -> Result<bool> {
+    let current_dir = std::env::current_dir().context("Failed to get current directory")?;
+    let git_dir = current_dir.join(".git");
+    Ok(git_dir.exists())
 }
 
 /// Select platforms based on args or interactively
@@ -191,28 +207,42 @@ fn download_binaries(platforms: &[Platform], bin_directory: &Path) -> Result<()>
     Ok(())
 }
 
+/// GitHub repository for releases
+const GITHUB_REPO: &str = "CodingWithCalvin/rnr.cli";
+
 /// Download a single binary from GitHub releases
 #[cfg(feature = "network")]
 fn download_binary(platform: Platform, dest: &Path) -> Result<()> {
-    use std::io::Write;
-
-    // TODO: Replace with actual release URL once we have releases
-    // For now, use GitHub releases URL pattern
     let url = format!(
-        "https://github.com/CodingWithCalvin/rnr.cli/releases/latest/download/{}",
+        "https://github.com/{}/releases/latest/download/{}",
+        GITHUB_REPO,
         platform.binary_name()
     );
 
-    // For now, create a placeholder since we don't have releases yet
-    // In production, this would download from the URL
-    let placeholder = format!(
-        "#!/bin/sh\necho 'Placeholder binary for {}. Replace with actual binary from releases.'\n",
-        platform.id()
-    );
+    let client = reqwest::blocking::Client::builder()
+        .user_agent("rnr-cli")
+        .build()
+        .context("Failed to create HTTP client")?;
 
-    let mut file =
-        fs::File::create(dest).with_context(|| format!("Failed to create {}", dest.display()))?;
-    file.write_all(placeholder.as_bytes())?;
+    let response = client
+        .get(&url)
+        .send()
+        .with_context(|| format!("Failed to download {}", platform.binary_name()))?;
+
+    if !response.status().is_success() {
+        anyhow::bail!(
+            "Failed to download {}: HTTP {}",
+            platform.binary_name(),
+            response.status().as_u16()
+        );
+    }
+
+    let bytes = response
+        .bytes()
+        .with_context(|| format!("Failed to read response for {}", platform.binary_name()))?;
+
+    // Write to file
+    fs::write(dest, &bytes).with_context(|| format!("Failed to write {}", dest.display()))?;
 
     // Make executable on Unix
     #[cfg(unix)]
@@ -222,14 +252,6 @@ fn download_binary(platform: Platform, dest: &Path) -> Result<()> {
         perms.set_mode(0o755);
         fs::set_permissions(dest, perms)?;
     }
-
-    // TODO: Actual download implementation:
-    // let response = reqwest::blocking::get(&url)
-    //     .with_context(|| format!("Failed to download {}", url))?;
-    // let bytes = response.bytes()?;
-    // fs::write(dest, bytes)?;
-
-    let _ = url; // Suppress unused warning for now
 
     Ok(())
 }
