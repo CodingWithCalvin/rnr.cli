@@ -138,6 +138,11 @@ jobs:
             platform: windows-amd64
             binary: rnr.exe
 
+          - os: windows-latest
+            target: aarch64-pc-windows-msvc
+            platform: windows-arm64
+            binary: rnr.exe
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -162,7 +167,7 @@ jobs:
         run: cargo build --release --target ${{ matrix.target }}
 
       - name: Verify build
-        if: matrix.target != 'aarch64-apple-darwin'
+        if: matrix.target != 'aarch64-apple-darwin' && matrix.target != 'aarch64-pc-windows-msvc'
         shell: bash
         run: |
           ./target/${{ matrix.target }}/release/${{ matrix.binary }} --version
