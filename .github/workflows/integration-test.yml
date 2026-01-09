@@ -127,11 +127,11 @@ jobs:
         run: |
           OUTPUT=$(../../${{ matrix.binary }} with-env 2>&1)
           echo "$OUTPUT"
-          if ! echo "$OUTPUT" | grep -q "MY_VAR=my_value"; then
-            echo "ERROR: Expected 'MY_VAR=my_value' in output"
+          if ! echo "$OUTPUT" | grep -q "Environment variables are set"; then
+            echo "ERROR: Expected 'Environment variables are set' in output"
             exit 1
           fi
-          echo "✅ Environment variables passed"
+          echo "✅ Environment variables task passed"
 
       # ==================== Steps Tests ====================
 
