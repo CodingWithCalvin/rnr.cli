@@ -1,0 +1,31 @@
+# Steps test fixture - sequential and parallel execution
+
+# Sequential steps
+sequential:
+  description: Run steps sequentially
+  steps:
+    - cmd: echo "Step 1"
+    - cmd: echo "Step 2"
+    - cmd: echo "Step 3"
+
+# Task delegation in steps
+delegate:
+  description: Delegate to other tasks
+  steps:
+    - task: step-a
+    - task: step-b
+    - task: step-c
+
+step-a: echo "Running step A"
+step-b: echo "Running step B"
+step-c: echo "Running step C"
+
+# Mixed steps and parallel
+mixed:
+  description: Mix of sequential and parallel
+  steps:
+    - cmd: echo "Starting..."
+    - parallel:
+        - cmd: echo "Parallel task 1"
+        - cmd: echo "Parallel task 2"
+    - cmd: echo "Done"
