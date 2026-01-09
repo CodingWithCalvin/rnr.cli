@@ -78,13 +78,6 @@ Which platforms should this project support?
   Selected: 1.95 MB total
 ```
 
-Or use non-interactive mode for CI:
-```bash
-./rnr init --platforms linux-amd64,macos-arm64,windows-amd64
-./rnr init --all-platforms
-./rnr init --current-platform-only
-```
-
 ### What Gets Created
 
 ```
