@@ -84,14 +84,43 @@ fn execute_step(
 ) -> Result<()> {
     match step {
         Step::Simple(step_def) => execute_step_def(step_def, default_dir, default_env, config),
-        Step::Parallel { parallel } => {
-            // TODO: Implement parallel execution with tokio
-            // For now, run sequentially
-            for step_def in parallel {
-                execute_step_def(step_def, default_dir, default_env, config)?;
-            }
-            Ok(())
+        Step::Parallel { parallel } => execute_parallel(parallel, default_dir, default_env, config),
+    }
+}
+
+/// Execute steps in parallel using scoped threads
+fn execute_parallel(
+    steps: &[StepDef],
+    default_dir: &Path,
+    default_env: &HashMap<String, String>,
+    config: &Config,
+) -> Result<()> {
+    use std::sync::Mutex;
+    use std::thread;
+
+    let errors: Mutex<Vec<anyhow::Error>> = Mutex::new(Vec::new());
+
+    thread::scope(|s| {
+        for step_def in steps {
+            s.spawn(|| {
+                if let Err(e) = execute_step_def(step_def, default_dir, default_env, config) {
+                    errors.lock().unwrap().push(e);
+                }
+            });
         }
+    });
+
+    let errors = errors.into_inner().unwrap();
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        // Combine all errors into one message
+        let error_messages: Vec<String> = errors.iter().map(|e| format!("  - {}", e)).collect();
+        anyhow::bail!(
+            "Parallel execution failed with {} error(s):\n{}",
+            error_messages.len(),
+            error_messages.join("\n")
+        )
     }
 }
 
