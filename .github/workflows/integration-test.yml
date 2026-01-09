@@ -62,7 +62,8 @@ jobs:
             ${{ runner.os }}-cargo-
 
       - name: Build release binary
-        run: cargo build --release
+        # Build without network feature so init uses placeholder binaries (no releases exist yet)
+        run: cargo build --release --no-default-features --features parallel
 
       - name: Copy binary to test location
         shell: bash
