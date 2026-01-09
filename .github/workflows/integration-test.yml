@@ -232,6 +232,7 @@ jobs:
         run: |
           INIT_DIR=$(mktemp -d)
           cd "$INIT_DIR"
+          git init
           $GITHUB_WORKSPACE/tests/${{ matrix.binary }} init --current-platform-only
 
           # Verify files were created
@@ -271,6 +272,7 @@ jobs:
         run: |
           INIT_DIR=$(mktemp -d)
           cd "$INIT_DIR"
+          git init
           $GITHUB_WORKSPACE/tests/${{ matrix.binary }} init --platforms linux-amd64,macos-arm64,windows-amd64
 
           # Verify config has the right platforms
@@ -309,6 +311,7 @@ jobs:
         run: |
           INIT_DIR=$(mktemp -d)
           cd "$INIT_DIR"
+          git init
 
           # First init with one platform
           $GITHUB_WORKSPACE/tests/${{ matrix.binary }} init --platforms linux-amd64
@@ -345,6 +348,7 @@ jobs:
         run: |
           INIT_DIR=$(mktemp -d)
           cd "$INIT_DIR"
+          git init
           $GITHUB_WORKSPACE/tests/${{ matrix.binary }} init --platforms linux-amd64,windows-amd64
 
           OUTPUT=$($GITHUB_WORKSPACE/tests/${{ matrix.binary }} init --show-platforms 2>&1)
@@ -365,6 +369,7 @@ jobs:
         run: |
           INIT_DIR=$(mktemp -d)
           cd "$INIT_DIR"
+          git init
           $GITHUB_WORKSPACE/tests/${{ matrix.binary }} init --platforms linux-amd64
 
           # Try to remove the only platform - should fail
