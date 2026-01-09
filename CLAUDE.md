@@ -195,13 +195,32 @@ build-all:
 
 ## CI/CD
 
-### Expected Workflows
+### Workflows
 
 | Workflow | Trigger | Purpose |
 |----------|---------|---------|
-| `build.yml` | PR, push to main | Lint, build, test on Windows/macOS/Linux |
-| `release.yml` | Manual/tag | Build release binaries for all platforms |
+| `build.yml` | PR, push to main | Lint (fmt, clippy), build, test on Windows/macOS/Linux |
+| `integration-test.yml` | PR, push to main | E2E tests for task execution and init command |
 | `commit-lint.yml` | PR | Validate PR titles follow conventional commits |
+| `contributors.yml` | Push to main | Auto-update contributors section in README |
+| `preview-changelog.yml` | PR | Preview release notes for PRs |
+| `release.yml` | Manual dispatch | Full release: validate, build, create GitHub Release, notify |
+
+### Release Process
+
+1. Ensure build workflow passes on main
+2. Go to Actions -> Release -> Run workflow
+3. Enter version number (e.g., `1.0.0`)
+4. Workflow validates version, builds all platforms, creates GitHub Release
+5. Publishes binaries and archives for all 5 platforms
+6. Creates GitHub Discussion announcement
+7. Posts to Bluesky and LinkedIn
+
+### Release Artifacts
+
+Each release publishes:
+- Raw binaries: `rnr-{platform}` (for direct download by `init` command)
+- Archives: `rnr-{version}-{platform}.{tar.gz|zip}` (for manual installation)
 
 ---
 
