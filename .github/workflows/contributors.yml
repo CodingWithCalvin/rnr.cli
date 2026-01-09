@@ -1,0 +1,11 @@
+name: Update Contributors
+
+on:
+  schedule:
+    - cron: '0 0 * * *'  # Run daily at midnight UTC
+  workflow_dispatch:  # Allow manual trigger
+
+jobs:
+  contributors:
+    uses: CodingWithCalvin/.github/.github/workflows/contributors.yml@main
+    secrets: inherit
