@@ -1,0 +1,18 @@
+# Basic test fixture - shorthand and full tasks
+
+# Shorthand tasks
+hello: echo "Hello, World!"
+greet: echo "Greetings from rnr"
+
+# Full task with description
+build:
+  description: Build the project
+  cmd: echo "Building project..."
+
+# Task with environment variables
+with-env:
+  description: Task with environment variables
+  env:
+    MY_VAR: my_value
+    ANOTHER_VAR: another_value
+  cmd: echo "MY_VAR=$MY_VAR ANOTHER_VAR=$ANOTHER_VAR"

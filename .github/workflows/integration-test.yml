@@ -1,0 +1,249 @@
+name: Integration Tests
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - 'src/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'tests/**'
+      - '.github/workflows/integration-test.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'src/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'tests/**'
+      - '.github/workflows/integration-test.yml'
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  integration-test:
+    name: E2E Tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            binary: rnr
+            shell: bash
+          - os: macos-latest
+            binary: rnr
+            shell: bash
+          - os: windows-latest
+            binary: rnr.exe
+            shell: bash
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Build release binary
+        run: cargo build --release
+
+      - name: Copy binary to test location
+        shell: bash
+        run: |
+          cp target/release/${{ matrix.binary }} tests/
+
+      # ==================== Basic Tests ====================
+
+      - name: "Test: --help"
+        shell: bash
+        working-directory: tests
+        run: |
+          echo "## --help output" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          ./${{ matrix.binary }} --help >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: "Test: --version"
+        shell: bash
+        working-directory: tests
+        run: |
+          ./${{ matrix.binary }} --version
+
+      - name: "Test: --list (basic fixture)"
+        shell: bash
+        working-directory: tests/fixtures/basic
+        run: |
+          echo "## --list output (basic)" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          ../../${{ matrix.binary }} --list >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      # ==================== Basic Task Execution ====================
+
+      - name: "Test: shorthand task"
+        shell: bash
+        working-directory: tests/fixtures/basic
+        run: |
+          OUTPUT=$(../../${{ matrix.binary }} hello 2>&1)
+          echo "$OUTPUT"
+          if ! echo "$OUTPUT" | grep -q "Hello, World!"; then
+            echo "ERROR: Expected 'Hello, World!' in output"
+            exit 1
+          fi
+          echo "✅ Shorthand task passed"
+
+      - name: "Test: full task with description"
+        shell: bash
+        working-directory: tests/fixtures/basic
+        run: |
+          OUTPUT=$(../../${{ matrix.binary }} build 2>&1)
+          echo "$OUTPUT"
+          if ! echo "$OUTPUT" | grep -q "Building project"; then
+            echo "ERROR: Expected 'Building project' in output"
+            exit 1
+          fi
+          echo "✅ Full task passed"
+
+      - name: "Test: task with environment variables"
+        shell: bash
+        working-directory: tests/fixtures/basic
+        run: |
+          OUTPUT=$(../../${{ matrix.binary }} with-env 2>&1)
+          echo "$OUTPUT"
+          if ! echo "$OUTPUT" | grep -q "MY_VAR=my_value"; then
+            echo "ERROR: Expected 'MY_VAR=my_value' in output"
+            exit 1
+          fi
+          echo "✅ Environment variables passed"
+
+      # ==================== Steps Tests ====================
+
+      - name: "Test: sequential steps"
+        shell: bash
+        working-directory: tests/fixtures/steps
+        run: |
+          OUTPUT=$(../../${{ matrix.binary }} sequential 2>&1)
+          echo "$OUTPUT"
+          if ! echo "$OUTPUT" | grep -q "Step 1"; then
+            echo "ERROR: Expected 'Step 1' in output"
+            exit 1
+          fi
+          if ! echo "$OUTPUT" | grep -q "Step 2"; then
+            echo "ERROR: Expected 'Step 2' in output"
+            exit 1
+          fi
+          if ! echo "$OUTPUT" | grep -q "Step 3"; then
+            echo "ERROR: Expected 'Step 3' in output"
+            exit 1
+          fi
+          echo "✅ Sequential steps passed"
+
+      - name: "Test: task delegation in steps"
+        shell: bash
+        working-directory: tests/fixtures/steps
+        run: |
+          OUTPUT=$(../../${{ matrix.binary }} delegate 2>&1)
+          echo "$OUTPUT"
+          if ! echo "$OUTPUT" | grep -q "Running step A"; then
+            echo "ERROR: Expected 'Running step A' in output"
+            exit 1
+          fi
+          if ! echo "$OUTPUT" | grep -q "Running step B"; then
+            echo "ERROR: Expected 'Running step B' in output"
+            exit 1
+          fi
+          if ! echo "$OUTPUT" | grep -q "Running step C"; then
+            echo "ERROR: Expected 'Running step C' in output"
+            exit 1
+          fi
+          echo "✅ Task delegation passed"
+
+      - name: "Test: mixed sequential and parallel"
+        shell: bash
+        working-directory: tests/fixtures/steps
+        run: |
+          OUTPUT=$(../../${{ matrix.binary }} mixed 2>&1)
+          echo "$OUTPUT"
+          if ! echo "$OUTPUT" | grep -q "Starting"; then
+            echo "ERROR: Expected 'Starting' in output"
+            exit 1
+          fi
+          if ! echo "$OUTPUT" | grep -q "Parallel task 1"; then
+            echo "ERROR: Expected 'Parallel task 1' in output"
+            exit 1
+          fi
+          if ! echo "$OUTPUT" | grep -q "Parallel task 2"; then
+            echo "ERROR: Expected 'Parallel task 2' in output"
+            exit 1
+          fi
+          if ! echo "$OUTPUT" | grep -q "Done"; then
+            echo "ERROR: Expected 'Done' in output"
+            exit 1
+          fi
+          echo "✅ Mixed steps passed"
+
+      # ==================== Nested Task Tests ====================
+
+      - name: "Test: command in subdirectory"
+        shell: bash
+        working-directory: tests/fixtures/nested
+        run: |
+          OUTPUT=$(../../${{ matrix.binary }} run-in-subdir 2>&1)
+          echo "$OUTPUT"
+          if ! echo "$OUTPUT" | grep -q "Running in subproject directory"; then
+            echo "ERROR: Expected 'Running in subproject directory' in output"
+            exit 1
+          fi
+          echo "✅ Command in subdirectory passed"
+
+      - name: "Test: nested task delegation"
+        shell: bash
+        working-directory: tests/fixtures/nested
+        run: |
+          OUTPUT=$(../../${{ matrix.binary }} build-subproject 2>&1)
+          echo "$OUTPUT"
+          if ! echo "$OUTPUT" | grep -q "Building subproject"; then
+            echo "ERROR: Expected 'Building subproject' in output"
+            exit 1
+          fi
+          echo "✅ Nested task delegation passed"
+
+      # ==================== Error Cases ====================
+
+      - name: "Test: nonexistent task (should fail)"
+        shell: bash
+        working-directory: tests/fixtures/basic
+        run: |
+          if ../../${{ matrix.binary }} nonexistent 2>&1; then
+            echo "ERROR: Expected nonexistent task to fail"
+            exit 1
+          fi
+          echo "✅ Nonexistent task correctly failed"
+
+      # ==================== Summary ====================
+
+      - name: Generate test summary
+        if: always()
+        shell: bash
+        run: |
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Integration Test Results - ${{ matrix.os }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✅ All integration tests completed" >> $GITHUB_STEP_SUMMARY

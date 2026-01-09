@@ -1,0 +1,7 @@
+# Subproject task file
+
+build: echo "Building subproject"
+
+test: echo "Testing subproject"
+
+clean: echo "Cleaning subproject"

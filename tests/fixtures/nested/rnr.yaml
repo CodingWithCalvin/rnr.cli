@@ -1,0 +1,21 @@
+# Nested test fixture - task delegation to subdirectories
+
+# Delegate to subproject's build task
+build-subproject:
+  description: Build subproject
+  dir: subproject
+  task: build
+
+# Run command in subdirectory
+run-in-subdir:
+  description: Run command in subdirectory
+  dir: subproject
+  cmd: echo "Running in subproject directory"
+
+# Multiple subproject tasks
+all:
+  description: Run all subproject tasks
+  steps:
+    - task: build-subproject
+    - dir: subproject
+      task: test

@@ -51,6 +51,7 @@ pub enum Step {
 
 /// Definition of a single step
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct StepDef {
     /// Working directory
     pub dir: Option<String>,
@@ -136,6 +137,8 @@ pub fn project_root() -> Result<PathBuf> {
 mod tests {
     use super::*;
 
+    // ==================== Shorthand Parsing ====================
+
     #[test]
     fn test_parse_shorthand() {
         let yaml = r#"
@@ -149,6 +152,33 @@ build: cargo build --release
     }
 
     #[test]
+    fn test_parse_shorthand_value() {
+        let yaml = "build: cargo build --release";
+        let config: Config = serde_yaml::from_str(yaml).unwrap();
+        if let Some(TaskDef::Shorthand(cmd)) = config.get_task("build") {
+            assert_eq!(cmd, "cargo build --release");
+        } else {
+            panic!("Expected shorthand task");
+        }
+    }
+
+    #[test]
+    fn test_parse_multiple_shorthand() {
+        let yaml = r#"
+build: cargo build
+test: cargo test
+lint: cargo clippy
+"#;
+        let config: Config = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(config.tasks.len(), 3);
+        assert!(config.get_task("build").is_some());
+        assert!(config.get_task("test").is_some());
+        assert!(config.get_task("lint").is_some());
+    }
+
+    // ==================== Full Task Parsing ====================
+
+    #[test]
     fn test_parse_full_task() {
         let yaml = r#"
 build:
@@ -157,5 +187,342 @@ build:
 "#;
         let config: Config = serde_yaml::from_str(yaml).unwrap();
         assert!(matches!(config.get_task("build"), Some(TaskDef::Full(_))));
+    }
+
+    #[test]
+    fn test_parse_full_task_with_description() {
+        let yaml = r#"
+build:
+  description: Build the project for production
+  cmd: cargo build --release
+"#;
+        let config: Config = serde_yaml::from_str(yaml).unwrap();
+        if let Some(TaskDef::Full(task)) = config.get_task("build") {
+            assert_eq!(
+                task.description,
+                Some("Build the project for production".to_string())
+            );
+        } else {
+            panic!("Expected full task");
+        }
+    }
+
+    #[test]
+    fn test_parse_full_task_with_dir() {
+        let yaml = r#"
+build:
+  dir: src/subproject
+  cmd: cargo build
+"#;
+        let config: Config = serde_yaml::from_str(yaml).unwrap();
+        if let Some(TaskDef::Full(task)) = config.get_task("build") {
+            assert_eq!(task.dir, Some("src/subproject".to_string()));
+        } else {
+            panic!("Expected full task");
+        }
+    }
+
+    #[test]
+    fn test_parse_full_task_with_env() {
+        let yaml = r#"
+build:
+  env:
+    NODE_ENV: production
+    DEBUG: "false"
+  cmd: npm run build
+"#;
+        let config: Config = serde_yaml::from_str(yaml).unwrap();
+        if let Some(TaskDef::Full(task)) = config.get_task("build") {
+            let env = task.env.as_ref().unwrap();
+            assert_eq!(env.get("NODE_ENV"), Some(&"production".to_string()));
+            assert_eq!(env.get("DEBUG"), Some(&"false".to_string()));
+        } else {
+            panic!("Expected full task");
+        }
+    }
+
+    #[test]
+    fn test_parse_full_task_with_task_delegation() {
+        let yaml = r#"
+build:
+  dir: services/api
+  task: build
+"#;
+        let config: Config = serde_yaml::from_str(yaml).unwrap();
+        if let Some(TaskDef::Full(task)) = config.get_task("build") {
+            assert_eq!(task.task, Some("build".to_string()));
+            assert_eq!(task.dir, Some("services/api".to_string()));
+        } else {
+            panic!("Expected full task");
+        }
+    }
+
+    // ==================== Steps Parsing ====================
+
+    #[test]
+    fn test_parse_sequential_steps() {
+        let yaml = r#"
+ci:
+  steps:
+    - cmd: echo "Step 1"
+    - cmd: echo "Step 2"
+    - cmd: echo "Step 3"
+"#;
+        let config: Config = serde_yaml::from_str(yaml).unwrap();
+        if let Some(TaskDef::Full(task)) = config.get_task("ci") {
+            let steps = task.steps.as_ref().unwrap();
+            assert_eq!(steps.len(), 3);
+        } else {
+            panic!("Expected full task with steps");
+        }
+    }
+
+    #[test]
+    fn test_parse_steps_with_task_delegation() {
+        let yaml = r#"
+ci:
+  steps:
+    - task: lint
+    - task: test
+    - task: build
+"#;
+        let config: Config = serde_yaml::from_str(yaml).unwrap();
+        if let Some(TaskDef::Full(task)) = config.get_task("ci") {
+            let steps = task.steps.as_ref().unwrap();
+            assert_eq!(steps.len(), 3);
+            if let Step::Simple(step) = &steps[0] {
+                assert_eq!(step.task, Some("lint".to_string()));
+            } else {
+                panic!("Expected simple step");
+            }
+        } else {
+            panic!("Expected full task with steps");
+        }
+    }
+
+    #[test]
+    fn test_parse_steps_with_dir() {
+        let yaml = r#"
+build-all:
+  steps:
+    - dir: services/api
+      cmd: cargo build
+    - dir: services/web
+      cmd: npm run build
+"#;
+        let config: Config = serde_yaml::from_str(yaml).unwrap();
+        if let Some(TaskDef::Full(task)) = config.get_task("build-all") {
+            let steps = task.steps.as_ref().unwrap();
+            assert_eq!(steps.len(), 2);
+            if let Step::Simple(step) = &steps[0] {
+                assert_eq!(step.dir, Some("services/api".to_string()));
+                assert_eq!(step.cmd, Some("cargo build".to_string()));
+            } else {
+                panic!("Expected simple step");
+            }
+        } else {
+            panic!("Expected full task with steps");
+        }
+    }
+
+    // ==================== Parallel Parsing ====================
+
+    #[test]
+    fn test_parse_parallel_block() {
+        let yaml = r#"
+build-all:
+  steps:
+    - parallel:
+        - cmd: cargo build
+        - cmd: npm run build
+"#;
+        let config: Config = serde_yaml::from_str(yaml).unwrap();
+        if let Some(TaskDef::Full(task)) = config.get_task("build-all") {
+            let steps = task.steps.as_ref().unwrap();
+            assert_eq!(steps.len(), 1);
+            if let Step::Parallel { parallel } = &steps[0] {
+                assert_eq!(parallel.len(), 2);
+            } else {
+                panic!("Expected parallel step");
+            }
+        } else {
+            panic!("Expected full task with steps");
+        }
+    }
+
+    #[test]
+    fn test_parse_mixed_sequential_and_parallel() {
+        let yaml = r#"
+deploy:
+  steps:
+    - cmd: echo "Starting"
+    - parallel:
+        - task: build-api
+        - task: build-web
+    - cmd: echo "Done"
+"#;
+        let config: Config = serde_yaml::from_str(yaml).unwrap();
+        if let Some(TaskDef::Full(task)) = config.get_task("deploy") {
+            let steps = task.steps.as_ref().unwrap();
+            assert_eq!(steps.len(), 3);
+            assert!(matches!(&steps[0], Step::Simple(_)));
+            assert!(matches!(&steps[1], Step::Parallel { .. }));
+            assert!(matches!(&steps[2], Step::Simple(_)));
+        } else {
+            panic!("Expected full task with steps");
+        }
+    }
+
+    // ==================== Task Names ====================
+
+    #[test]
+    fn test_task_names_sorted() {
+        let yaml = r#"
+zebra: echo zebra
+alpha: echo alpha
+middle: echo middle
+"#;
+        let config: Config = serde_yaml::from_str(yaml).unwrap();
+        let names = config.task_names();
+        assert_eq!(names, vec!["alpha", "middle", "zebra"]);
+    }
+
+    #[test]
+    fn test_task_names_empty() {
+        let yaml = "{}";
+        let config: Config = serde_yaml::from_str(yaml).unwrap();
+        let names = config.task_names();
+        assert!(names.is_empty());
+    }
+
+    // ==================== Get Task ====================
+
+    #[test]
+    fn test_get_task_exists() {
+        let yaml = "build: cargo build";
+        let config: Config = serde_yaml::from_str(yaml).unwrap();
+        assert!(config.get_task("build").is_some());
+    }
+
+    #[test]
+    fn test_get_task_not_exists() {
+        let yaml = "build: cargo build";
+        let config: Config = serde_yaml::from_str(yaml).unwrap();
+        assert!(config.get_task("nonexistent").is_none());
+    }
+
+    // ==================== Mixed Tasks ====================
+
+    #[test]
+    fn test_parse_mixed_shorthand_and_full() {
+        let yaml = r#"
+lint: cargo clippy
+build:
+  description: Build the project
+  cmd: cargo build --release
+test: cargo test
+"#;
+        let config: Config = serde_yaml::from_str(yaml).unwrap();
+        assert!(matches!(
+            config.get_task("lint"),
+            Some(TaskDef::Shorthand(_))
+        ));
+        assert!(matches!(config.get_task("build"), Some(TaskDef::Full(_))));
+        assert!(matches!(
+            config.get_task("test"),
+            Some(TaskDef::Shorthand(_))
+        ));
+    }
+
+    // ==================== Complex Config ====================
+
+    #[test]
+    fn test_parse_complex_config() {
+        let yaml = r#"
+lint: cargo clippy
+
+build-api:
+  description: Build API service
+  dir: services/api
+  env:
+    RUST_LOG: info
+  cmd: cargo build --release
+
+build-web:
+  description: Build web frontend
+  dir: services/web
+  env:
+    NODE_ENV: production
+  cmd: npm run build
+
+build-all:
+  description: Build everything
+  steps:
+    - cmd: echo "Starting builds..."
+    - parallel:
+        - task: build-api
+        - task: build-web
+    - cmd: echo "All builds complete"
+
+deploy:
+  description: Deploy to production
+  steps:
+    - task: build-all
+    - cmd: ./scripts/deploy.sh
+"#;
+        let config: Config = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(config.tasks.len(), 5);
+
+        // Check lint (shorthand)
+        if let Some(TaskDef::Shorthand(cmd)) = config.get_task("lint") {
+            assert_eq!(cmd, "cargo clippy");
+        } else {
+            panic!("Expected shorthand lint task");
+        }
+
+        // Check build-api (full with env)
+        if let Some(TaskDef::Full(task)) = config.get_task("build-api") {
+            assert_eq!(task.description, Some("Build API service".to_string()));
+            assert_eq!(task.dir, Some("services/api".to_string()));
+            assert!(task.env.is_some());
+        } else {
+            panic!("Expected full build-api task");
+        }
+
+        // Check build-all (steps with parallel)
+        if let Some(TaskDef::Full(task)) = config.get_task("build-all") {
+            let steps = task.steps.as_ref().unwrap();
+            assert_eq!(steps.len(), 3);
+        } else {
+            panic!("Expected full build-all task");
+        }
+    }
+
+    // ==================== Edge Cases ====================
+
+    #[test]
+    fn test_parse_task_with_colons_in_name() {
+        let yaml = r#"
+"api:build": cargo build
+"web:build": npm run build
+"#;
+        let config: Config = serde_yaml::from_str(yaml).unwrap();
+        assert!(config.get_task("api:build").is_some());
+        assert!(config.get_task("web:build").is_some());
+    }
+
+    #[test]
+    fn test_parse_empty_env() {
+        let yaml = r#"
+build:
+  env: {}
+  cmd: cargo build
+"#;
+        let config: Config = serde_yaml::from_str(yaml).unwrap();
+        if let Some(TaskDef::Full(task)) = config.get_task("build") {
+            assert!(task.env.as_ref().unwrap().is_empty());
+        } else {
+            panic!("Expected full task");
+        }
     }
 }
