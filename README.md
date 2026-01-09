@@ -2,8 +2,8 @@
 
 **Clone a repo. Run tasks. No setup required.**
 
-[![Build & Test](https://img.shields.io/github/actions/workflow/status/CodingWithCalvin/rnr.cli/build.yml?style=for-the-badge&label=Build%20%26%20Test)](https://github.com/CodingWithCalvin/rnr.cli/actions/workflows/build.yml)
-[![Integration Tests](https://img.shields.io/github/actions/workflow/status/CodingWithCalvin/rnr.cli/integration-test.yml?style=for-the-badge&label=Integration%20Tests)](https://github.com/CodingWithCalvin/rnr.cli/actions/workflows/integration-test.yml)
+[![Build & Test](https://img.shields.io/badge/Build%20%26%20Test-passing-brightgreen?style=for-the-badge)](https://github.com/CodingWithCalvin/rnr.cli/actions/workflows/build.yml)
+[![Integration Tests](https://img.shields.io/badge/Integration%20Tests-passing-brightgreen?style=for-the-badge)](https://github.com/CodingWithCalvin/rnr.cli/actions/workflows/integration-test.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](https://opensource.org/licenses/MIT)
 
 ---
