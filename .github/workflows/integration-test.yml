@@ -62,7 +62,8 @@ jobs:
             ${{ runner.os }}-cargo-
 
       - name: Build release binary
-        run: cargo build --release
+        # Build without network feature so init uses placeholder binaries (no releases exist yet)
+        run: cargo build --release --no-default-features --features parallel
 
       - name: Copy binary to test location
         shell: bash
@@ -232,6 +233,7 @@ jobs:
         run: |
           INIT_DIR=$(mktemp -d)
           cd "$INIT_DIR"
+          git init
           $GITHUB_WORKSPACE/tests/${{ matrix.binary }} init --current-platform-only
 
           # Verify files were created
@@ -271,6 +273,7 @@ jobs:
         run: |
           INIT_DIR=$(mktemp -d)
           cd "$INIT_DIR"
+          git init
           $GITHUB_WORKSPACE/tests/${{ matrix.binary }} init --platforms linux-amd64,macos-arm64,windows-amd64
 
           # Verify config has the right platforms
@@ -309,6 +312,7 @@ jobs:
         run: |
           INIT_DIR=$(mktemp -d)
           cd "$INIT_DIR"
+          git init
 
           # First init with one platform
           $GITHUB_WORKSPACE/tests/${{ matrix.binary }} init --platforms linux-amd64
@@ -345,6 +349,7 @@ jobs:
         run: |
           INIT_DIR=$(mktemp -d)
           cd "$INIT_DIR"
+          git init
           $GITHUB_WORKSPACE/tests/${{ matrix.binary }} init --platforms linux-amd64,windows-amd64
 
           OUTPUT=$($GITHUB_WORKSPACE/tests/${{ matrix.binary }} init --show-platforms 2>&1)
@@ -365,6 +370,7 @@ jobs:
         run: |
           INIT_DIR=$(mktemp -d)
           cd "$INIT_DIR"
+          git init
           $GITHUB_WORKSPACE/tests/${{ matrix.binary }} init --platforms linux-amd64
 
           # Try to remove the only platform - should fail
@@ -374,6 +380,31 @@ jobs:
           fi
 
           echo "✅ init correctly refuses to remove last platform"
+          rm -rf "$INIT_DIR"
+
+      - name: "Test: init --force skips git repo check"
+        shell: bash
+        run: |
+          INIT_DIR=$(mktemp -d)
+          cd "$INIT_DIR"
+          # Do NOT run git init - this is intentionally not a git repo
+
+          # Without --force, should fail
+          if $GITHUB_WORKSPACE/tests/${{ matrix.binary }} init --current-platform-only 2>&1; then
+            echo "ERROR: init should fail without --force in non-git directory"
+            exit 1
+          fi
+
+          # With --force, should succeed
+          $GITHUB_WORKSPACE/tests/${{ matrix.binary }} init --current-platform-only --force
+
+          # Verify files were created
+          if [ ! -f ".rnr/config.yaml" ]; then
+            echo "ERROR: .rnr/config.yaml not created with --force"
+            exit 1
+          fi
+
+          echo "✅ init --force correctly skips git repo check"
           rm -rf "$INIT_DIR"
 
       # ==================== Error Cases ====================

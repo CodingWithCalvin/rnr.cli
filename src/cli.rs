@@ -51,4 +51,8 @@ pub struct InitArgs {
     /// Show currently configured platforms
     #[arg(long)]
     pub show_platforms: bool,
+
+    /// Skip git repository root check
+    #[arg(long)]
+    pub force: bool,
 }
