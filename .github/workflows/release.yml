@@ -1,0 +1,374 @@
+name: Release
+
+run-name: Release v${{ inputs.version }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version number (e.g., 1.0.0, 0.2.1)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  discussions: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  validate:
+    name: Validate Release
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Verify build workflow passed
+      run: |
+        echo "Checking if build workflow passed for commit ${{ github.sha }}..."
+
+        BUILD_RUNS=$(gh run list \
+          --workflow=build.yml \
+          --commit=${{ github.sha }} \
+          --status=success \
+          --json databaseId,conclusion \
+          --jq 'length')
+
+        if [ "$BUILD_RUNS" -eq 0 ]; then
+          echo "::error::No successful build workflow run found for commit ${{ github.sha }}"
+          echo ""
+          echo "The build workflow must pass before creating a release."
+          echo "Please ensure the build workflow has completed successfully for this commit."
+          echo ""
+          echo "View workflows: https://github.com/${{ github.repository }}/actions"
+          exit 1
+        fi
+
+        echo "Build workflow has passed for this commit"
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Validate version format
+      run: |
+        VERSION="${{ github.event.inputs.version }}"
+        if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+          echo "::error::Version must be in format X.Y.Z (e.g., 1.0.0)"
+          exit 1
+        fi
+        echo "Version format is valid: $VERSION"
+      shell: bash
+
+    - name: Validate version is greater than latest release
+      run: |
+        NEW_VERSION="${{ github.event.inputs.version }}"
+
+        LATEST_TAG=$(git describe --tags --abbrev=0 --match "v*" 2>/dev/null || echo "")
+
+        if [ -z "$LATEST_TAG" ]; then
+          echo "No previous release tags found"
+          echo "This will be the first release: v$NEW_VERSION"
+          exit 0
+        fi
+
+        CURRENT_VERSION="${LATEST_TAG#v}"
+        echo "Latest release: $CURRENT_VERSION (tag: $LATEST_TAG)"
+        echo "New version: $NEW_VERSION"
+
+        IFS='.' read -r curr_major curr_minor curr_patch <<< "$CURRENT_VERSION"
+        IFS='.' read -r new_major new_minor new_patch <<< "$NEW_VERSION"
+
+        curr_major=$((10#$curr_major))
+        curr_minor=$((10#$curr_minor))
+        curr_patch=$((10#$curr_patch))
+        new_major=$((10#$new_major))
+        new_minor=$((10#$new_minor))
+        new_patch=$((10#$new_patch))
+
+        if [ $new_major -gt $curr_major ]; then
+          echo "Version is valid (major version increased: $curr_major -> $new_major)"
+        elif [ $new_major -eq $curr_major ] && [ $new_minor -gt $curr_minor ]; then
+          echo "Version is valid (minor version increased: $curr_minor -> $new_minor)"
+        elif [ $new_major -eq $curr_major ] && [ $new_minor -eq $curr_minor ] && [ $new_patch -gt $curr_patch ]; then
+          echo "Version is valid (patch version increased: $curr_patch -> $new_patch)"
+        else
+          echo "::error::New version ($NEW_VERSION) must be greater than latest release ($CURRENT_VERSION)"
+          exit 1
+        fi
+      shell: bash
+
+  build:
+    name: Build ${{ matrix.platform }}
+    runs-on: ${{ matrix.os }}
+    needs: validate
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            platform: linux-amd64
+            binary: rnr
+            archive_ext: tar.gz
+
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            platform: macos-amd64
+            binary: rnr
+            archive_ext: tar.gz
+
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            platform: macos-arm64
+            binary: rnr
+            archive_ext: tar.gz
+
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            platform: windows-amd64
+            binary: rnr.exe
+            archive_ext: zip
+
+          - os: windows-latest
+            target: aarch64-pc-windows-msvc
+            platform: windows-arm64
+            binary: rnr.exe
+            archive_ext: zip
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-${{ matrix.target }}-cargo-release-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ matrix.target }}-cargo-release-
+
+      - name: Update version in Cargo.toml
+        run: |
+          VERSION="${{ github.event.inputs.version }}"
+          sed -i.bak 's/^version = ".*"/version = "'"$VERSION"'"/' Cargo.toml
+          rm -f Cargo.toml.bak
+          echo "Updated Cargo.toml to version $VERSION"
+          grep "^version" Cargo.toml
+        shell: bash
+
+      - name: Build release binary
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Prepare binary for release
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp target/${{ matrix.target }}/release/${{ matrix.binary }} dist/rnr-${{ matrix.platform }}${{ matrix.binary == 'rnr.exe' && '.exe' || '' }}
+
+      - name: Create archive (Unix)
+        if: matrix.archive_ext == 'tar.gz'
+        run: |
+          cd dist
+          tar -czf rnr-${{ github.event.inputs.version }}-${{ matrix.platform }}.${{ matrix.archive_ext }} rnr-${{ matrix.platform }}
+        shell: bash
+
+      - name: Create archive (Windows)
+        if: matrix.archive_ext == 'zip'
+        run: |
+          cd dist
+          7z a rnr-${{ github.event.inputs.version }}-${{ matrix.platform }}.${{ matrix.archive_ext }} rnr-${{ matrix.platform }}.exe
+        shell: bash
+
+      - name: Upload build artifact (archive)
+        uses: actions/upload-artifact@v4
+        with:
+          name: archive-${{ matrix.platform }}
+          path: dist/rnr-${{ github.event.inputs.version }}-${{ matrix.platform }}.${{ matrix.archive_ext }}
+          retention-days: 1
+
+      - name: Upload build artifact (raw binary)
+        uses: actions/upload-artifact@v4
+        with:
+          name: binary-${{ matrix.platform }}
+          path: dist/rnr-${{ matrix.platform }}${{ matrix.binary == 'rnr.exe' && '.exe' || '' }}
+          retention-days: 1
+
+  changelog:
+    name: Generate Changelog
+    needs: build
+    uses: CodingWithCalvin/.github/.github/workflows/generate-changelog.yml@main
+    secrets: inherit
+
+  release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    needs: [build, changelog]
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: artifacts
+
+    - name: List artifacts
+      run: find artifacts -type f | head -50
+      shell: bash
+
+    - name: Create and push release tag
+      run: |
+        VERSION="${{ github.event.inputs.version }}"
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+
+        git tag -a "v$VERSION" -m "Release v$VERSION"
+        git push origin "v$VERSION"
+        echo "Created and pushed tag v$VERSION"
+      shell: bash
+
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: v${{ github.event.inputs.version }}
+        name: v${{ github.event.inputs.version }}
+        files: |
+          artifacts/archive-linux-amd64/rnr-${{ github.event.inputs.version }}-linux-amd64.tar.gz
+          artifacts/archive-macos-amd64/rnr-${{ github.event.inputs.version }}-macos-amd64.tar.gz
+          artifacts/archive-macos-arm64/rnr-${{ github.event.inputs.version }}-macos-arm64.tar.gz
+          artifacts/archive-windows-amd64/rnr-${{ github.event.inputs.version }}-windows-amd64.zip
+          artifacts/archive-windows-arm64/rnr-${{ github.event.inputs.version }}-windows-arm64.zip
+          artifacts/binary-linux-amd64/rnr-linux-amd64
+          artifacts/binary-macos-amd64/rnr-macos-amd64
+          artifacts/binary-macos-arm64/rnr-macos-arm64
+          artifacts/binary-windows-amd64/rnr-windows-amd64.exe
+          artifacts/binary-windows-arm64/rnr-windows-arm64.exe
+        body: |
+          ## What's New in v${{ github.event.inputs.version }}
+
+          ${{ needs.changelog.outputs.changelog }}
+
+          ## Installation
+
+          ### Initialize a Project (Recommended)
+
+          Download the binary for your platform, then run `init` to set up your project:
+
+          ```bash
+          # Example for macOS ARM64
+          curl -LO https://github.com/${{ github.repository }}/releases/download/v${{ github.event.inputs.version }}/rnr-macos-arm64
+          chmod +x rnr-macos-arm64
+          ./rnr-macos-arm64 init
+          ```
+
+          This creates the `.rnr/` directory with binaries for your selected platforms, wrapper scripts, and a starter `rnr.yaml`.
+
+          ### Manual Download
+
+          Download the appropriate binary or archive for your platform from the assets below.
+
+          ## Binary Assets
+
+          | Platform | Binary | Archive |
+          |----------|--------|---------|
+          | Linux x86_64 | `rnr-linux-amd64` | `rnr-${{ github.event.inputs.version }}-linux-amd64.tar.gz` |
+          | macOS x86_64 | `rnr-macos-amd64` | `rnr-${{ github.event.inputs.version }}-macos-amd64.tar.gz` |
+          | macOS ARM64 | `rnr-macos-arm64` | `rnr-${{ github.event.inputs.version }}-macos-arm64.tar.gz` |
+          | Windows x86_64 | `rnr-windows-amd64.exe` | `rnr-${{ github.event.inputs.version }}-windows-amd64.zip` |
+          | Windows ARM64 | `rnr-windows-arm64.exe` | `rnr-${{ github.event.inputs.version }}-windows-arm64.zip` |
+
+          ## Supported Platforms
+
+          - Linux (x86_64)
+          - macOS (x86_64, ARM64/Apple Silicon)
+          - Windows (x86_64, ARM64)
+        draft: false
+        prerelease: false
+        generate_release_notes: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  notify-discussion:
+    name: Create GitHub Discussion
+    needs: release
+    uses: CodingWithCalvin/.github/.github/workflows/github-discussion.yml@main
+    with:
+      title: "rnr v${{ github.event.inputs.version }} has been released!"
+      body: |
+        ## Changes in this release
+
+        See the [full changelog](https://github.com/${{ github.repository }}/releases/tag/v${{ github.event.inputs.version }}) for details on what's new in this release.
+
+        ## What is rnr?
+
+        **rnr** (pronounced "runner") is a cross-platform task runner that works instantly on any machine. No Node.js. No Python. No global installs. Just clone and go.
+
+        ## Quick Start
+
+        ```bash
+        git clone your-repo
+        ./rnr build    # It just works!
+        ```
+
+        ## Installation
+
+        Download the binary for your platform from the [release page](https://github.com/${{ github.repository }}/releases/tag/v${{ github.event.inputs.version }}), then run `./rnr init` to set up your project.
+
+        ---
+
+        [View Release](https://github.com/${{ github.repository }}/releases/tag/v${{ github.event.inputs.version }}) | [Documentation](https://github.com/${{ github.repository }})
+
+  notify-bluesky:
+    name: Post to Bluesky
+    needs: notify-discussion
+    uses: CodingWithCalvin/.github/.github/workflows/bluesky-post.yml@main
+    with:
+      post_text: |
+        rnr v${{ github.event.inputs.version }} is now available!
+
+        Cross-platform task runner with zero setup - clone a repo and tasks just work!
+
+        #rnr #taskrunner #devtools #rust #opensource
+
+        [Release Notes](https://github.com/${{ github.repository }}/releases/tag/v${{ github.event.inputs.version }})
+        [Discussion](${{ needs.notify-discussion.outputs.discussion_url }})
+      embed_url: https://github.com/${{ github.repository }}/releases/tag/v${{ github.event.inputs.version }}
+      embed_title: rnr v${{ github.event.inputs.version }}
+      embed_description: Cross-platform task runner with zero setup
+    secrets:
+      BLUESKY_USERNAME: ${{ secrets.BLUESKY_USERNAME }}
+      BLUESKY_APP_PASSWORD: ${{ secrets.BLUESKY_APP_PASSWORD }}
+
+  notify-linkedin:
+    name: Post to LinkedIn
+    needs: notify-discussion
+    uses: CodingWithCalvin/.github/.github/workflows/linkedin-post.yml@main
+    with:
+      post_text: |
+        rnr v${{ github.event.inputs.version }} is now available!
+
+        Cross-platform task runner with zero setup - clone a repo and tasks just work!
+
+        #rnr #taskrunner #devtools #rust #opensource
+
+        Release Notes: https://github.com/${{ github.repository }}/releases/tag/v${{ github.event.inputs.version }}
+        Discussion: ${{ needs.notify-discussion.outputs.discussion_url }}
+      article_url: https://github.com/${{ github.repository }}/releases/tag/v${{ github.event.inputs.version }}
+      article_title: rnr v${{ github.event.inputs.version }}
+      article_description: Cross-platform task runner with zero setup
+    secrets:
+      LINKEDIN_ACCESS_TOKEN: ${{ secrets.LINKEDIN_ACCESS_TOKEN }}
+      LINKEDIN_CLIENT_ID: ${{ secrets.LINKEDIN_CLIENT_ID }}

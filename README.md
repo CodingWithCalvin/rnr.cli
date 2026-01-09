@@ -33,19 +33,67 @@ rnr binaries live **inside your repo**. Contributors clone and run—zero fricti
 
 ## 🚀 Quick Start
 
-### Initialize a Project
+### Initialize a Project (One-time setup by maintainer)
 
+**Linux:**
 ```bash
-# Download and run init (one-time setup by maintainer)
-curl -sSL https://rnr.dev/rnr -o rnr && chmod +x rnr && ./rnr init
+curl -fsSL https://github.com/CodingWithCalvin/rnr.cli/releases/latest/download/rnr-linux-amd64 -o rnr
+chmod +x rnr
+./rnr init
 ```
 
-This creates:
+**macOS (Intel):**
+```bash
+curl -fsSL https://github.com/CodingWithCalvin/rnr.cli/releases/latest/download/rnr-macos-amd64 -o rnr
+chmod +x rnr
+./rnr init
+```
+
+**macOS (Apple Silicon):**
+```bash
+curl -fsSL https://github.com/CodingWithCalvin/rnr.cli/releases/latest/download/rnr-macos-arm64 -o rnr
+chmod +x rnr
+./rnr init
+```
+
+**Windows (PowerShell):**
+```powershell
+Invoke-WebRequest -Uri "https://github.com/CodingWithCalvin/rnr.cli/releases/latest/download/rnr-windows-amd64.exe" -OutFile "rnr.exe"
+.\rnr.exe init
+```
+
+### Platform Selection
+
+During `init`, you'll choose which platforms your project should support:
+
+```
+Which platforms should this project support?
+
+  [x] linux-amd64      (760 KB)
+  [ ] macos-amd64      (662 KB)
+  [x] macos-arm64      (608 KB)  <- current
+  [x] windows-amd64    (584 KB)
+  [ ] windows-arm64    (528 KB)
+
+  Selected: 1.95 MB total
+```
+
+Or use non-interactive mode for CI:
+```bash
+./rnr init --platforms linux-amd64,macos-arm64,windows-amd64
+./rnr init --all-platforms
+./rnr init --current-platform-only
+```
+
+### What Gets Created
+
 ```
 your-repo/
-├── .rnr/bin/          # Platform binaries (Linux, macOS, Windows)
-├── rnr                # Unix wrapper script
-├── rnr.cmd            # Windows wrapper script
+├── .rnr/
+│   ├── config.yaml    # Tracks configured platforms
+│   └── bin/           # Platform binaries (only selected ones)
+├── rnr                # Unix wrapper script (auto-detects platform)
+├── rnr.cmd            # Windows wrapper script (auto-detects arch)
 └── rnr.yaml           # Your task definitions
 ```
 
@@ -56,6 +104,16 @@ your-repo/
 ./rnr test         # Run the 'test' task
 ./rnr --list       # See all available tasks
 ```
+
+### For Contributors
+
+After cloning a repo with rnr configured:
+```bash
+git clone your-repo
+./rnr build    # It just works! 🎉
+```
+
+No installs. No setup. The binaries are already in the repo.
 
 ---
 
