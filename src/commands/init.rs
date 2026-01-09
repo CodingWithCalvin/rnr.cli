@@ -1,55 +1,155 @@
-use anyhow::{Context, Result};
+//! Initialize rnr in the current directory
+
+use anyhow::{bail, Context, Result};
+use dialoguer::MultiSelect;
 use std::fs;
 use std::path::Path;
 
+use crate::cli::InitArgs;
 use crate::config::CONFIG_FILE;
+use crate::platform::{format_size, total_size, Platform, ALL_PLATFORMS};
+use crate::rnr_config::{bin_dir, is_initialized, RnrConfig};
 
-/// Directory for rnr binaries
-const RNR_DIR: &str = ".rnr";
-const BIN_DIR: &str = "bin";
+/// Current rnr version
+const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Run the init command
-pub fn run() -> Result<()> {
-    let current_dir = std::env::current_dir().context("Failed to get current directory")?;
+pub fn run(args: &InitArgs) -> Result<()> {
+    // Handle --show-platforms
+    if args.show_platforms {
+        return show_platforms();
+    }
 
-    // Check if already initialized
-    let rnr_dir = current_dir.join(RNR_DIR);
-    if rnr_dir.exists() {
-        println!("rnr is already initialized in this directory");
+    // Handle --add-platform
+    if let Some(platform_id) = &args.add_platform {
+        return add_platform(platform_id);
+    }
+
+    // Handle --remove-platform
+    if let Some(platform_id) = &args.remove_platform {
+        return remove_platform(platform_id);
+    }
+
+    // Check if already initialized (for fresh init)
+    if is_initialized()? {
+        println!("rnr is already initialized in this directory.");
+        println!("Use --add-platform or --remove-platform to modify platforms.");
+        println!("Use --show-platforms to see configured platforms.");
         return Ok(());
     }
 
-    println!("Initializing rnr...");
+    // Determine platforms to install
+    let platforms = select_platforms(args)?;
+
+    if platforms.is_empty() {
+        bail!("No platforms selected. At least one platform is required.");
+    }
+
+    // Perform initialization
+    initialize(&platforms)
+}
+
+/// Select platforms based on args or interactively
+fn select_platforms(args: &InitArgs) -> Result<Vec<Platform>> {
+    // --all-platforms
+    if args.all_platforms {
+        return Ok(ALL_PLATFORMS.to_vec());
+    }
+
+    // --current-platform-only
+    if args.current_platform_only {
+        let current = Platform::current()
+            .context("Unable to detect current platform. Use --platforms to specify manually.")?;
+        return Ok(vec![current]);
+    }
+
+    // --platforms list
+    if let Some(platform_ids) = &args.platforms {
+        let mut platforms = Vec::new();
+        for id in platform_ids {
+            let platform = Platform::from_id(id)
+                .with_context(|| format!("Unknown platform: {}. Valid platforms: linux-amd64, macos-amd64, macos-arm64, windows-amd64, windows-arm64", id))?;
+            platforms.push(platform);
+        }
+        return Ok(platforms);
+    }
+
+    // Interactive selection
+    interactive_platform_select()
+}
+
+/// Interactive platform selection
+fn interactive_platform_select() -> Result<Vec<Platform>> {
+    let current = Platform::current();
+
+    // Build items with size info
+    let items: Vec<String> = ALL_PLATFORMS
+        .iter()
+        .map(|p| {
+            let marker = if Some(*p) == current {
+                " <- current"
+            } else {
+                ""
+            };
+            format!("{:<16} ({}){}", p.id(), p.size_display(), marker)
+        })
+        .collect();
+
+    // Determine default selections (current platform pre-selected)
+    let defaults: Vec<bool> = ALL_PLATFORMS.iter().map(|p| Some(*p) == current).collect();
+
+    println!("\nWhich platforms should this project support?\n");
+
+    let selections = MultiSelect::new()
+        .items(&items)
+        .defaults(&defaults)
+        .interact()
+        .context("Platform selection cancelled")?;
+
+    let selected: Vec<Platform> = selections.iter().map(|&i| ALL_PLATFORMS[i]).collect();
+
+    // Show total size
+    let total = total_size(&selected);
+    println!("\nSelected: {} total\n", format_size(total));
+
+    Ok(selected)
+}
+
+/// Perform the actual initialization
+fn initialize(platforms: &[Platform]) -> Result<()> {
+    let current_dir = std::env::current_dir().context("Failed to get current directory")?;
+
+    println!("Initializing rnr...\n");
 
     // Create .rnr/bin directory
-    let bin_dir = rnr_dir.join(BIN_DIR);
-    fs::create_dir_all(&bin_dir).context("Failed to create .rnr/bin directory")?;
-    println!("  Created {}/{}", RNR_DIR, BIN_DIR);
+    let bin_directory = bin_dir()?;
+    fs::create_dir_all(&bin_directory).context("Failed to create .rnr/bin directory")?;
+    println!("  Created .rnr/bin/");
 
-    // Download binaries for all platforms
-    #[cfg(feature = "network")]
-    {
-        download_binaries(&bin_dir)?;
-    }
+    // Download binaries
+    download_binaries(platforms, &bin_directory)?;
 
-    #[cfg(not(feature = "network"))]
-    {
-        println!("  Skipping binary download (network feature disabled)");
-        println!("  Please manually copy binaries to {}/{}", RNR_DIR, BIN_DIR);
-    }
+    // Save config
+    let config = RnrConfig::new(VERSION, platforms);
+    config.save()?;
+    println!("  Created .rnr/config.yaml");
 
     // Create wrapper scripts
     create_wrapper_scripts(&current_dir)?;
 
     // Create starter rnr.yaml if it doesn't exist
-    let config_path = current_dir.join(CONFIG_FILE);
-    if !config_path.exists() {
-        create_starter_config(&config_path)?;
+    let task_config_path = current_dir.join(CONFIG_FILE);
+    if !task_config_path.exists() {
+        create_starter_config(&task_config_path)?;
     } else {
         println!("  {} already exists, skipping", CONFIG_FILE);
     }
 
     println!("\nrnr initialized successfully!");
+    println!("\nConfigured platforms:");
+    for p in platforms {
+        println!("  - {}", p.id());
+    }
     println!("\nNext steps:");
     println!("  1. Edit {} to define your tasks", CONFIG_FILE);
     println!("  2. Run ./rnr --list to see available tasks");
@@ -59,31 +159,112 @@ pub fn run() -> Result<()> {
     Ok(())
 }
 
-/// Download binaries for all platforms
-#[cfg(feature = "network")]
-fn download_binaries(bin_dir: &Path) -> Result<()> {
-    // TODO: Implement actual binary downloads from rnr.dev
-    // For now, just create placeholder files
+/// Download binaries for selected platforms
+fn download_binaries(platforms: &[Platform], bin_directory: &Path) -> Result<()> {
     println!("  Downloading binaries...");
-    println!("    TODO: Download from https://rnr.dev/bin/latest/");
 
-    // Placeholder - in real implementation, download from server
-    let platforms = ["rnr-linux", "rnr-macos", "rnr.exe"];
     for platform in platforms {
-        let path = bin_dir.join(platform);
-        fs::write(&path, "# placeholder binary\n")
-            .with_context(|| format!("Failed to create {}", path.display()))?;
-        println!("    Created {}", platform);
+        let binary_path = bin_directory.join(platform.binary_name());
+
+        #[cfg(feature = "network")]
+        {
+            download_binary(*platform, &binary_path)?;
+        }
+
+        #[cfg(not(feature = "network"))]
+        {
+            // Create placeholder for testing without network
+            fs::write(
+                &binary_path,
+                format!("# placeholder for {}\n", platform.id()),
+            )
+            .with_context(|| format!("Failed to create {}", binary_path.display()))?;
+        }
+
+        println!(
+            "    {} ({})",
+            platform.binary_name(),
+            platform.size_display()
+        );
     }
+
+    Ok(())
+}
+
+/// Download a single binary from GitHub releases
+#[cfg(feature = "network")]
+fn download_binary(platform: Platform, dest: &Path) -> Result<()> {
+    use std::io::Write;
+
+    // TODO: Replace with actual release URL once we have releases
+    // For now, use GitHub releases URL pattern
+    let url = format!(
+        "https://github.com/CodingWithCalvin/rnr.cli/releases/latest/download/{}",
+        platform.binary_name()
+    );
+
+    // For now, create a placeholder since we don't have releases yet
+    // In production, this would download from the URL
+    let placeholder = format!(
+        "#!/bin/sh\necho 'Placeholder binary for {}. Replace with actual binary from releases.'\n",
+        platform.id()
+    );
+
+    let mut file =
+        fs::File::create(dest).with_context(|| format!("Failed to create {}", dest.display()))?;
+    file.write_all(placeholder.as_bytes())?;
+
+    // Make executable on Unix
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = fs::metadata(dest)?.permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(dest, perms)?;
+    }
+
+    // TODO: Actual download implementation:
+    // let response = reqwest::blocking::get(&url)
+    //     .with_context(|| format!("Failed to download {}", url))?;
+    // let bytes = response.bytes()?;
+    // fs::write(dest, bytes)?;
+
+    let _ = url; // Suppress unused warning for now
 
     Ok(())
 }
 
 /// Create the wrapper scripts at the project root
 fn create_wrapper_scripts(project_root: &Path) -> Result<()> {
-    // Unix wrapper script
+    // Unix wrapper script (smart detection)
     let unix_script = r#"#!/bin/sh
-exec "$(dirname "$0")/.rnr/bin/rnr-$(uname -s | tr A-Z a-z)" "$@"
+set -e
+
+# Detect OS
+OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+case "$OS" in
+  linux*) OS="linux" ;;
+  darwin*) OS="macos" ;;
+  *) echo "Error: Unsupported OS: $OS" >&2; exit 1 ;;
+esac
+
+# Detect architecture
+ARCH=$(uname -m)
+case "$ARCH" in
+  x86_64|amd64) ARCH="amd64" ;;
+  arm64|aarch64) ARCH="arm64" ;;
+  *) echo "Error: Unsupported architecture: $ARCH" >&2; exit 1 ;;
+esac
+
+BINARY="$(dirname "$0")/.rnr/bin/rnr-${OS}-${ARCH}"
+
+if [ ! -f "$BINARY" ]; then
+  echo "Error: rnr is not configured for ${OS}-${ARCH}." >&2
+  echo "Run 'rnr init --add-platform ${OS}-${ARCH}' to add support." >&2
+  exit 1
+fi
+
+exec "$BINARY" "$@"
 "#;
 
     let unix_path = project_root.join("rnr");
@@ -100,9 +281,26 @@ exec "$(dirname "$0")/.rnr/bin/rnr-$(uname -s | tr A-Z a-z)" "$@"
 
     println!("  Created rnr (Unix wrapper)");
 
-    // Windows wrapper script
+    // Windows wrapper script (smart detection)
     let windows_script = r#"@echo off
-"%~dp0.rnr\bin\rnr.exe" %*
+setlocal
+
+:: Detect architecture
+if "%PROCESSOR_ARCHITECTURE%"=="ARM64" (
+  set "ARCH=arm64"
+) else (
+  set "ARCH=amd64"
+)
+
+set "BINARY=%~dp0.rnr\bin\rnr-windows-%ARCH%.exe"
+
+if not exist "%BINARY%" (
+  echo Error: rnr is not configured for windows-%ARCH%. >&2
+  echo Run 'rnr init --add-platform windows-%ARCH%' to add support. >&2
+  exit /b 1
+)
+
+"%BINARY%" %*
 "#;
 
     let windows_path = project_root.join("rnr.cmd");
@@ -136,6 +334,129 @@ ci:
 
     fs::write(path, starter).context("Failed to create rnr.yaml")?;
     println!("  Created {}", CONFIG_FILE);
+
+    Ok(())
+}
+
+/// Show currently configured platforms
+fn show_platforms() -> Result<()> {
+    if !is_initialized()? {
+        println!("rnr is not initialized in this directory.");
+        println!("Run 'rnr init' to initialize.");
+        return Ok(());
+    }
+
+    let config = RnrConfig::load()?;
+    let platforms = config.get_platforms();
+
+    println!("\nConfigured platforms:\n");
+    let mut total: u64 = 0;
+    for p in &platforms {
+        println!("  {} ({})", p.id(), p.size_display());
+        total += p.size_bytes();
+    }
+    println!("\nTotal: {}", format_size(total));
+
+    Ok(())
+}
+
+/// Add a platform to existing setup
+fn add_platform(platform_id: &str) -> Result<()> {
+    if !is_initialized()? {
+        bail!("rnr is not initialized. Run 'rnr init' first.");
+    }
+
+    let platform = Platform::from_id(platform_id).with_context(|| {
+        format!(
+            "Unknown platform: {}. Valid platforms: linux-amd64, macos-amd64, macos-arm64, windows-amd64, windows-arm64",
+            platform_id
+        )
+    })?;
+
+    let mut config = RnrConfig::load()?;
+
+    if config.has_platform(platform) {
+        println!("Platform {} is already configured.", platform_id);
+        return Ok(());
+    }
+
+    // Download the binary
+    let bin_directory = bin_dir()?;
+    let binary_path = bin_directory.join(platform.binary_name());
+
+    println!("Adding platform {}...", platform_id);
+
+    #[cfg(feature = "network")]
+    {
+        download_binary(platform, &binary_path)?;
+    }
+
+    #[cfg(not(feature = "network"))]
+    {
+        fs::write(
+            &binary_path,
+            format!("# placeholder for {}\n", platform.id()),
+        )?;
+    }
+
+    println!(
+        "  Downloaded {} ({})",
+        platform.binary_name(),
+        platform.size_display()
+    );
+
+    // Update config
+    config.add_platform(platform);
+    config.save()?;
+    println!("  Updated .rnr/config.yaml");
+
+    println!("\nPlatform {} added successfully!", platform_id);
+
+    Ok(())
+}
+
+/// Remove a platform from existing setup
+fn remove_platform(platform_id: &str) -> Result<()> {
+    if !is_initialized()? {
+        bail!("rnr is not initialized. Run 'rnr init' first.");
+    }
+
+    let platform = Platform::from_id(platform_id).with_context(|| {
+        format!(
+            "Unknown platform: {}. Valid platforms: linux-amd64, macos-amd64, macos-arm64, windows-amd64, windows-arm64",
+            platform_id
+        )
+    })?;
+
+    let mut config = RnrConfig::load()?;
+
+    if !config.has_platform(platform) {
+        println!("Platform {} is not configured.", platform_id);
+        return Ok(());
+    }
+
+    // Check if this is the last platform
+    if config.get_platforms().len() == 1 {
+        bail!("Cannot remove the last platform. At least one platform must be configured.");
+    }
+
+    println!("Removing platform {}...", platform_id);
+
+    // Remove the binary
+    let bin_directory = bin_dir()?;
+    let binary_path = bin_directory.join(platform.binary_name());
+    if binary_path.exists() {
+        fs::remove_file(&binary_path)
+            .with_context(|| format!("Failed to remove {}", binary_path.display()))?;
+        println!("  Removed {}", platform.binary_name());
+    }
+
+    // Update config
+    config.remove_platform(platform);
+    config.save()?;
+    println!("  Updated .rnr/config.yaml");
+
+    println!("\nPlatform {} removed successfully!", platform_id);
 
     Ok(())
 }

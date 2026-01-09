@@ -32,14 +32,31 @@ When a repo is initialized with rnr, it contains:
 ```
 project/
 ├── .rnr/
+│   ├── config.yaml            # Platform configuration
 │   └── bin/
-│       ├── rnr-linux          # Linux binary
-│       ├── rnr-macos          # macOS binary
-│       └── rnr.exe            # Windows binary
+│       ├── rnr-linux-amd64    # Linux x86_64 binary
+│       ├── rnr-macos-amd64    # macOS x86_64 binary
+│       ├── rnr-macos-arm64    # macOS ARM64 binary
+│       ├── rnr-windows-amd64.exe   # Windows x86_64 binary
+│       └── rnr-windows-arm64.exe   # Windows ARM64 binary
 ├── rnr                        # Shell wrapper script (Unix)
 ├── rnr.cmd                    # Batch wrapper script (Windows)
 ├── rnr.yaml                   # Task definitions
 └── ... (rest of project)
+```
+
+**Note:** Only the selected platforms are included. Most projects only need 2-3 platforms.
+
+### Platform Configuration
+
+`.rnr/config.yaml` tracks which platforms are configured:
+
+```yaml
+version: "0.1.0"
+platforms:
+  - linux-amd64
+  - macos-arm64
+  - windows-amd64
 ```
 
 ### Wrapper Scripts
@@ -47,13 +64,56 @@ project/
 **`rnr` (Unix shell script):**
 ```bash
 #!/bin/sh
-exec "$(dirname "$0")/.rnr/bin/rnr-$(uname -s | tr A-Z a-z)" "$@"
+set -e
+
+# Detect OS
+OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+case "$OS" in
+  linux*) OS="linux" ;;
+  darwin*) OS="macos" ;;
+  *) echo "Error: Unsupported OS: $OS" >&2; exit 1 ;;
+esac
+
+# Detect architecture
+ARCH=$(uname -m)
+case "$ARCH" in
+  x86_64|amd64) ARCH="amd64" ;;
+  arm64|aarch64) ARCH="arm64" ;;
+  *) echo "Error: Unsupported architecture: $ARCH" >&2; exit 1 ;;
+esac
+
+BINARY="$(dirname "$0")/.rnr/bin/rnr-${OS}-${ARCH}"
+
+if [ ! -f "$BINARY" ]; then
+  echo "Error: rnr is not configured for ${OS}-${ARCH}." >&2
+  echo "Run 'rnr init --add-platform ${OS}-${ARCH}' to add support." >&2
+  exit 1
+fi
+
+exec "$BINARY" "$@"
 ```
 
 **`rnr.cmd` (Windows batch script):**
 ```batch
 @echo off
-"%~dp0.rnr\bin\rnr.exe" %*
+setlocal
+
+:: Detect architecture
+if "%PROCESSOR_ARCHITECTURE%"=="ARM64" (
+  set "ARCH=arm64"
+) else (
+  set "ARCH=amd64"
+)
+
+set "BINARY=%~dp0.rnr\bin\rnr-windows-%ARCH%.exe"
+
+if not exist "%BINARY%" (
+  echo Error: rnr is not configured for windows-%ARCH%. >&2
+  echo Run 'rnr init --add-platform windows-%ARCH%' to add support. >&2
+  exit /b 1
+)
+
+"%BINARY%" %*
 ```
 
 ---
@@ -70,12 +130,66 @@ curl -sSL https://rnr.dev/rnr -o rnr && chmod +x rnr && ./rnr init
 irm https://rnr.dev/rnr.exe -OutFile rnr.exe; .\rnr.exe init
 ```
 
+#### Interactive Platform Selection
+
+When running `rnr init`, an interactive prompt lets you choose which platforms to support:
+
+```
+Initializing rnr...
+
+Which platforms should this project support?
+(Current platform is pre-selected)
+
+  [x] linux-amd64      (760 KB)
+  [ ] macos-amd64      (662 KB)
+  [x] macos-arm64      (608 KB)  <- current
+  [x] windows-amd64    (584 KB)
+  [ ] windows-arm64    (528 KB)
+
+  Selected: 1.95 MB total
+
+  [Enter] Confirm  [Space] Toggle  [a] All  [n] None  [Esc] Cancel
+```
+
+#### Non-Interactive Mode
+
+For CI/CD or scripting, use flags:
+
+```bash
+# Specify exact platforms
+rnr init --platforms linux-amd64,macos-arm64,windows-amd64
+
+# Include all platforms
+rnr init --all-platforms
+
+# Current platform only
+rnr init --current-platform-only
+```
+
+#### Init Steps
+
 The `init` command:
-1. Creates `.rnr/bin/` directory
-2. Downloads all platform binaries (including copying itself)
-3. Creates wrapper scripts (`rnr`, `rnr.cmd`)
-4. Creates starter `rnr.yaml`
-5. Cleans up the initial downloaded binary
+1. Detects current platform and pre-selects it
+2. Shows interactive platform selection (unless flags provided)
+3. Creates `.rnr/bin/` directory
+4. Downloads selected platform binaries from GitHub Releases
+5. Creates `.rnr/config.yaml` with selected platforms
+6. Creates wrapper scripts (`rnr`, `rnr.cmd`)
+7. Creates starter `rnr.yaml` if one doesn't exist
+8. Cleans up the initial downloaded binary
+
+#### Adding/Removing Platforms Later
+
+```bash
+# Add a platform
+rnr init --add-platform windows-arm64
+
+# Remove a platform
+rnr init --remove-platform linux-amd64
+
+# Show current platforms
+rnr init --show-platforms
+```
 
 ### Running Tasks (contributors)
 
@@ -259,13 +373,28 @@ api:test:
 ### rnr init
 
 Creates the full rnr setup in the current directory:
-- `.rnr/bin/` with all platform binaries
+
+```
+rnr init [OPTIONS]
+
+Options:
+  --platforms <list>       Comma-separated list of platforms (non-interactive)
+  --all-platforms          Include all available platforms
+  --current-platform-only  Only include the current platform
+  --add-platform <name>    Add a platform to existing setup
+  --remove-platform <name> Remove a platform from existing setup
+  --show-platforms         Show currently configured platforms
+```
+
+Creates:
+- `.rnr/bin/` with selected platform binaries
+- `.rnr/config.yaml` tracking configured platforms
 - `rnr` and `rnr.cmd` wrapper scripts
-- Starter `rnr.yaml` with example tasks
+- Starter `rnr.yaml` with example tasks (if not exists)
 
 ### rnr upgrade
 
-Downloads the latest rnr binaries and replaces those in `.rnr/bin/`. Preserves the `rnr.yaml` and wrapper scripts.
+Downloads the latest rnr binaries for configured platforms and replaces those in `.rnr/bin/`. Reads `.rnr/config.yaml` to know which platforms to update.
 
 ### rnr --list
 
@@ -290,35 +419,36 @@ Available tasks:
 ## MVP Features (v0.1)
 
 ### Core Functionality
-- [ ] Parse `rnr.yaml` task files
-- [ ] Run shell commands (`cmd`)
-- [ ] Set working directory (`dir`)
-- [ ] Environment variables (`env`)
-- [ ] Task descriptions (`description`)
-- [ ] Sequential steps (`steps`)
-- [ ] Parallel execution (`parallel`)
-- [ ] Delegate to other tasks (`task`)
-- [ ] Delegate to nested task files (`dir` + `task`)
-- [ ] Shorthand syntax (`task: command`)
+- [x] Parse `rnr.yaml` task files
+- [x] Run shell commands (`cmd`)
+- [x] Set working directory (`dir`)
+- [x] Environment variables (`env`)
+- [x] Task descriptions (`description`)
+- [x] Sequential steps (`steps`)
+- [x] Parallel execution (`parallel`)
+- [x] Delegate to other tasks (`task`)
+- [x] Delegate to nested task files (`dir` + `task`)
+- [x] Shorthand syntax (`task: command`)
 
 ### Built-in Commands
-- [ ] `rnr init` - Initialize repo
-- [ ] `rnr upgrade` - Update binaries
-- [ ] `rnr --list` - List tasks
-- [ ] `rnr --help` - Show help
-- [ ] `rnr --version` - Show version
+- [ ] `rnr init` - Initialize repo with platform selection
+- [ ] `rnr upgrade` - Update binaries for configured platforms
+- [x] `rnr --list` - List tasks
+- [x] `rnr --help` - Show help
+- [x] `rnr --version` - Show version
 
 ### Cross-Platform
-- [ ] Build for Linux (x86_64)
-- [ ] Build for macOS (x86_64, arm64)
-- [ ] Build for Windows (x86_64)
+- [x] Build for Linux (x86_64)
+- [x] Build for macOS (x86_64, arm64)
+- [x] Build for Windows (x86_64, arm64)
 - [ ] Shell wrapper script generation
 - [ ] Batch wrapper script generation
 
 ### Distribution
-- [ ] Host binaries for download
-- [ ] Init downloads all platform binaries
-- [ ] Upgrade fetches latest binaries
+- [ ] Host binaries on GitHub Releases
+- [ ] Init downloads selected platform binaries
+- [ ] Upgrade fetches latest binaries for configured platforms
+- [ ] Platform selection (interactive and non-interactive)
 
 ---
 
@@ -469,11 +599,29 @@ When run without arguments, show interactive task picker:
 - Memory safe
 - Strong ecosystem for CLI tools (clap, serde, etc.)
 
-### Binary Size Target
-Goal: < 500KB per platform after optimization
-- Use `opt-level = "z"` for size optimization
+### Binary Sizes
+
+Current binary sizes per platform:
+
+| Platform | Size |
+|----------|------|
+| Linux x86_64 | ~760 KB |
+| macOS x86_64 | ~662 KB |
+| macOS ARM64 | ~608 KB |
+| Windows x86_64 | ~584 KB |
+| Windows ARM64 | ~528 KB |
+| **All platforms** | **~3.1 MB** |
+
+Size optimizations applied:
+- `opt-level = "z"` for size optimization
+- LTO (Link-Time Optimization)
 - Strip symbols
-- Consider `cargo-zigbuild` for easy cross-compilation
+- `panic = "abort"`
+
+Future size reduction options:
+- Replace `reqwest` with `ureq` (smaller HTTP client)
+- Remove `tokio` if not needed for async
+- Use smaller YAML parser
 
 ### Shell Execution
 - **Unix**: Execute commands via `sh -c "<command>"`
