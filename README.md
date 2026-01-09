@@ -190,6 +190,7 @@ deploy:
 | macOS | x86_64 | ✅ |
 | macOS | ARM64 (Apple Silicon) | ✅ |
 | Windows | x86_64 | ✅ |
+| Windows | ARM64 | ✅ |
 
 ---
 
