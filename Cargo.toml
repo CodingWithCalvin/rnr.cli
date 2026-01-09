@@ -23,6 +23,10 @@ thiserror = "1"
 # Cross-platform support
 dirs = "5"
 
+# Interactive prompts
+dialoguer = "0.11"
+console = "0.15"
+
 # HTTP client for init/upgrade
 reqwest = { version = "0.12", features = ["blocking"], default-features = false, optional = true }
 

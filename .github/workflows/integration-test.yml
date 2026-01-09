@@ -225,6 +225,157 @@ jobs:
           fi
           echo "✅ Nested task delegation passed"
 
+      # ==================== Init Command Tests ====================
+
+      - name: "Test: init --current-platform-only"
+        shell: bash
+        run: |
+          INIT_DIR=$(mktemp -d)
+          cd "$INIT_DIR"
+          $GITHUB_WORKSPACE/tests/${{ matrix.binary }} init --current-platform-only
+
+          # Verify files were created
+          if [ ! -f ".rnr/config.yaml" ]; then
+            echo "ERROR: .rnr/config.yaml not created"
+            exit 1
+          fi
+          if [ ! -d ".rnr/bin" ]; then
+            echo "ERROR: .rnr/bin directory not created"
+            exit 1
+          fi
+          if [ ! -f "rnr.yaml" ]; then
+            echo "ERROR: rnr.yaml not created"
+            exit 1
+          fi
+          if [ ! -f "rnr" ]; then
+            echo "ERROR: rnr wrapper not created"
+            exit 1
+          fi
+          if [ ! -f "rnr.cmd" ]; then
+            echo "ERROR: rnr.cmd wrapper not created"
+            exit 1
+          fi
+
+          # Verify config has exactly one platform
+          PLATFORM_COUNT=$(grep -c "^-" .rnr/config.yaml || echo "0")
+          if [ "$PLATFORM_COUNT" != "1" ]; then
+            echo "ERROR: Expected 1 platform, got $PLATFORM_COUNT"
+            exit 1
+          fi
+
+          echo "✅ init --current-platform-only passed"
+          rm -rf "$INIT_DIR"
+
+      - name: "Test: init --platforms with multiple platforms"
+        shell: bash
+        run: |
+          INIT_DIR=$(mktemp -d)
+          cd "$INIT_DIR"
+          $GITHUB_WORKSPACE/tests/${{ matrix.binary }} init --platforms linux-amd64,macos-arm64,windows-amd64
+
+          # Verify config has the right platforms
+          if ! grep -q "linux-amd64" .rnr/config.yaml; then
+            echo "ERROR: linux-amd64 not in config"
+            exit 1
+          fi
+          if ! grep -q "macos-arm64" .rnr/config.yaml; then
+            echo "ERROR: macos-arm64 not in config"
+            exit 1
+          fi
+          if ! grep -q "windows-amd64" .rnr/config.yaml; then
+            echo "ERROR: windows-amd64 not in config"
+            exit 1
+          fi
+
+          # Verify binaries exist
+          if [ ! -f ".rnr/bin/rnr-linux-amd64" ]; then
+            echo "ERROR: rnr-linux-amd64 binary not created"
+            exit 1
+          fi
+          if [ ! -f ".rnr/bin/rnr-macos-arm64" ]; then
+            echo "ERROR: rnr-macos-arm64 binary not created"
+            exit 1
+          fi
+          if [ ! -f ".rnr/bin/rnr-windows-amd64.exe" ]; then
+            echo "ERROR: rnr-windows-amd64.exe binary not created"
+            exit 1
+          fi
+
+          echo "✅ init --platforms passed"
+          rm -rf "$INIT_DIR"
+
+      - name: "Test: init --add-platform and --remove-platform"
+        shell: bash
+        run: |
+          INIT_DIR=$(mktemp -d)
+          cd "$INIT_DIR"
+
+          # First init with one platform
+          $GITHUB_WORKSPACE/tests/${{ matrix.binary }} init --platforms linux-amd64
+
+          # Add a platform
+          $GITHUB_WORKSPACE/tests/${{ matrix.binary }} init --add-platform macos-arm64
+
+          if ! grep -q "macos-arm64" .rnr/config.yaml; then
+            echo "ERROR: macos-arm64 not added to config"
+            exit 1
+          fi
+          if [ ! -f ".rnr/bin/rnr-macos-arm64" ]; then
+            echo "ERROR: rnr-macos-arm64 binary not created"
+            exit 1
+          fi
+
+          # Remove a platform
+          $GITHUB_WORKSPACE/tests/${{ matrix.binary }} init --remove-platform linux-amd64
+
+          if grep -q "linux-amd64" .rnr/config.yaml; then
+            echo "ERROR: linux-amd64 should have been removed from config"
+            exit 1
+          fi
+          if [ -f ".rnr/bin/rnr-linux-amd64" ]; then
+            echo "ERROR: rnr-linux-amd64 binary should have been removed"
+            exit 1
+          fi
+
+          echo "✅ init --add-platform and --remove-platform passed"
+          rm -rf "$INIT_DIR"
+
+      - name: "Test: init --show-platforms"
+        shell: bash
+        run: |
+          INIT_DIR=$(mktemp -d)
+          cd "$INIT_DIR"
+          $GITHUB_WORKSPACE/tests/${{ matrix.binary }} init --platforms linux-amd64,windows-amd64
+
+          OUTPUT=$($GITHUB_WORKSPACE/tests/${{ matrix.binary }} init --show-platforms 2>&1)
+          if ! echo "$OUTPUT" | grep -q "linux-amd64"; then
+            echo "ERROR: --show-platforms should list linux-amd64"
+            exit 1
+          fi
+          if ! echo "$OUTPUT" | grep -q "windows-amd64"; then
+            echo "ERROR: --show-platforms should list windows-amd64"
+            exit 1
+          fi
+
+          echo "✅ init --show-platforms passed"
+          rm -rf "$INIT_DIR"
+
+      - name: "Test: init refuses to remove last platform"
+        shell: bash
+        run: |
+          INIT_DIR=$(mktemp -d)
+          cd "$INIT_DIR"
+          $GITHUB_WORKSPACE/tests/${{ matrix.binary }} init --platforms linux-amd64
+
+          # Try to remove the only platform - should fail
+          if $GITHUB_WORKSPACE/tests/${{ matrix.binary }} init --remove-platform linux-amd64 2>&1; then
+            echo "ERROR: Should not be able to remove last platform"
+            exit 1
+          fi
+
+          echo "✅ init correctly refuses to remove last platform"
+          rm -rf "$INIT_DIR"
+
       # ==================== Error Cases ====================
 
       - name: "Test: nonexistent task (should fail)"

@@ -1,6 +1,8 @@
 mod cli;
 mod commands;
 mod config;
+mod platform;
+mod rnr_config;
 mod runner;
 
 use anyhow::Result;
@@ -11,7 +13,7 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Some(Command::Init) => commands::init::run()?,
+        Some(Command::Init(args)) => commands::init::run(&args)?,
         Some(Command::Upgrade) => commands::upgrade::run()?,
         None => {
             if cli.list {
