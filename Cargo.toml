@@ -1,0 +1,42 @@
+[package]
+name = "rnr"
+version = "0.1.0"
+edition = "2021"
+description = "A cross-platform task runner with zero setup"
+license = "MIT"
+repository = "https://github.com/CodingWithCalvin/rnr.cli"
+keywords = ["task-runner", "build", "automation", "cli"]
+categories = ["command-line-utilities", "development-tools"]
+
+[dependencies]
+# CLI argument parsing
+clap = { version = "4", features = ["derive"] }
+
+# YAML parsing
+serde = { version = "1", features = ["derive"] }
+serde_yaml = "0.9"
+
+# Error handling
+anyhow = "1"
+thiserror = "1"
+
+# Cross-platform support
+dirs = "5"
+
+# HTTP client for init/upgrade
+reqwest = { version = "0.12", features = ["blocking"], default-features = false, optional = true }
+
+# Async runtime for parallel execution
+tokio = { version = "1", features = ["rt-multi-thread", "process", "sync"], optional = true }
+
+[features]
+default = ["network", "parallel"]
+network = ["reqwest"]
+parallel = ["tokio"]
+
+[profile.release]
+opt-level = "z"     # Optimize for size
+lto = true          # Link-time optimization
+codegen-units = 1   # Single codegen unit for better optimization
+panic = "abort"     # Abort on panic (smaller binary)
+strip = true        # Strip symbols
