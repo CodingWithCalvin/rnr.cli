@@ -38,12 +38,12 @@ pub fn run(args: &InitArgs) -> Result<()> {
         return Ok(());
     }
 
-    // Error if not at git repo root
-    if !is_git_repo_root()? {
+    // Error if not at git repo root (unless --force is used)
+    if !args.force && !is_git_repo_root()? {
         bail!(
             "This directory does not appear to be a git repository root.\n\
-             rnr must be initialized at the root of a git repository.\n\
-             Please run 'rnr init' from the directory containing your .git folder."
+             rnr is typically initialized at the root of a git repository.\n\
+             Use --force to initialize anyway, or run from the directory containing your .git folder."
         );
     }
 

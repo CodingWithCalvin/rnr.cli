@@ -381,6 +381,31 @@ jobs:
           echo "✅ init correctly refuses to remove last platform"
           rm -rf "$INIT_DIR"
 
+      - name: "Test: init --force skips git repo check"
+        shell: bash
+        run: |
+          INIT_DIR=$(mktemp -d)
+          cd "$INIT_DIR"
+          # Do NOT run git init - this is intentionally not a git repo
+
+          # Without --force, should fail
+          if $GITHUB_WORKSPACE/tests/${{ matrix.binary }} init --current-platform-only 2>&1; then
+            echo "ERROR: init should fail without --force in non-git directory"
+            exit 1
+          fi
+
+          # With --force, should succeed
+          $GITHUB_WORKSPACE/tests/${{ matrix.binary }} init --current-platform-only --force
+
+          # Verify files were created
+          if [ ! -f ".rnr/config.yaml" ]; then
+            echo "ERROR: .rnr/config.yaml not created with --force"
+            exit 1
+          fi
+
+          echo "✅ init --force correctly skips git repo check"
+          rm -rf "$INIT_DIR"
+
       # ==================== Error Cases ====================
 
       - name: "Test: nonexistent task (should fail)"
