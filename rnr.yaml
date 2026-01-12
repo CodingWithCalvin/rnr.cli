@@ -1,0 +1,62 @@
+# rnr task definitions for rnr.cli development
+# Run ./rnr --list to see available tasks
+
+# Code formatting
+fmt:
+  description: Format code with rustfmt
+  cmd: cargo fmt
+
+# Linting
+clippy:
+  description: Run clippy lints
+  cmd: cargo clippy -- -D warnings
+
+# Testing
+test:
+  description: Run all tests
+  cmd: cargo test
+
+# Full validation (run before commits)
+check:
+  description: Run fmt, clippy, and tests
+  steps:
+    - task: fmt
+    - task: clippy
+    - task: test
+
+# Build
+build:
+  description: Build release binary
+  cmd: cargo build --release
+
+# Dogfooding - build and update local rnr binary
+# Use the task matching your platform, or dogfood-all for all platforms
+dogfood-windows-amd64:
+  description: Build and install to .rnr/bin (Windows x64)
+  cmd: cargo build --release && copy /Y target\release\rnr.exe .rnr\bin\rnr-windows-amd64.exe
+
+dogfood-windows-arm64:
+  description: Build and install to .rnr/bin (Windows ARM64)
+  cmd: cargo build --release && copy /Y target\release\rnr.exe .rnr\bin\rnr-windows-arm64.exe
+
+dogfood-linux-amd64:
+  description: Build and install to .rnr/bin (Linux x64)
+  cmd: cargo build --release && cp target/release/rnr .rnr/bin/rnr-linux-amd64
+
+dogfood-macos-amd64:
+  description: Build and install to .rnr/bin (macOS x64)
+  cmd: cargo build --release && cp target/release/rnr .rnr/bin/rnr-macos-amd64
+
+dogfood-macos-arm64:
+  description: Build and install to .rnr/bin (macOS ARM64)
+  cmd: cargo build --release && cp target/release/rnr .rnr/bin/rnr-macos-arm64
+
+# Build and install for all configured platforms
+dogfood-all:
+  description: Build and install to .rnr/bin for all platforms
+  steps:
+    - task: dogfood-windows-amd64
+    - task: dogfood-windows-arm64
+    - task: dogfood-linux-amd64
+    - task: dogfood-macos-amd64
+    - task: dogfood-macos-arm64
