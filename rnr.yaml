@@ -33,11 +33,11 @@ build:
 # Use the task matching your platform, or dogfood-all for all platforms
 dogfood-windows-amd64:
   description: Build and install to .rnr/bin (Windows x64)
-  cmd: cargo build --release && copy /Y target\release\rnr.exe .rnr\bin\rnr-windows-amd64.exe
+  cmd: cargo build --release && ren .rnr\bin\rnr-windows-amd64.exe rnr-windows-amd64.exe.old 2>nul & copy /Y target\release\rnr.exe .rnr\bin\rnr-windows-amd64.exe
 
 dogfood-windows-arm64:
   description: Build and install to .rnr/bin (Windows ARM64)
-  cmd: cargo build --release && copy /Y target\release\rnr.exe .rnr\bin\rnr-windows-arm64.exe
+  cmd: cargo build --release && ren .rnr\bin\rnr-windows-arm64.exe rnr-windows-arm64.exe.old 2>nul & copy /Y target\release\rnr.exe .rnr\bin\rnr-windows-arm64.exe
 
 dogfood-linux-amd64:
   description: Build and install to .rnr/bin (Linux x64)
