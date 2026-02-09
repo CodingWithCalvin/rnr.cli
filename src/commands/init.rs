@@ -351,9 +351,9 @@ build:
 ci:
   description: Run CI pipeline
   steps:
-    - cmd: echo "Step 1: Lint"
-    - cmd: echo "Step 2: Test"
-    - cmd: echo "Step 3: Build"
+    - cmd: 'echo "Step 1: Lint"'
+    - cmd: 'echo "Step 2: Test"'
+    - cmd: 'echo "Step 3: Build"'
 "#;
 
     fs::write(path, starter).context("Failed to create rnr.yaml")?;
