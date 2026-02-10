@@ -284,7 +284,7 @@ cargo run -- --help
 ## 👥 Contributors
 
 <!-- readme: contributors -start -->
-[![CalvinAllen](https://avatars.githubusercontent.com/u/41448698?v=4&s=64)](https://github.com/CalvinAllen) 
+[![CalvinAllen](https://avatars.githubusercontent.com/u/41448698?v=4&s=64)](https://github.com/CalvinAllen) [![BradKnowles](https://avatars.githubusercontent.com/u/1277856?v=4&s=64)](https://github.com/BradKnowles) 
 <!-- readme: contributors -end -->
 
 ---
