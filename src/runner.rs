@@ -176,15 +176,7 @@ fn execute_step_def(
 fn execute_command(cmd: &str, work_dir: &Path, env: &HashMap<String, String>) -> Result<()> {
     println!("$ {}", cmd);
 
-    let mut command = if cfg!(target_os = "windows") {
-        let mut c = Command::new("cmd");
-        c.args(["/C", cmd]);
-        c
-    } else {
-        let mut c = Command::new("sh");
-        c.args(["-c", cmd]);
-        c
-    };
+    let mut command = build_shell_command(cmd);
 
     command.current_dir(work_dir);
     command.envs(env);
@@ -199,4 +191,26 @@ fn execute_command(cmd: &str, work_dir: &Path, env: &HashMap<String, String>) ->
     }
 
     Ok(())
+}
+
+#[cfg(not(target_os = "windows"))]
+fn build_shell_command(cmd: &str) -> Command {
+    let mut c = Command::new("sh");
+    c.args(["-c", cmd]);
+    c
+}
+
+// On Windows, bypass Rust's MSVCRT-style arg escaping (which uses backslash
+// escapes that cmd.exe does not understand) and write the command line for
+// cmd.exe directly. `/S` makes cmd.exe deterministically strip exactly the
+// outermost pair of quotes, preserving any internal quotes — so a cmd like
+// `go build -ldflags="-s -w"` reaches its target program intact.
+#[cfg(target_os = "windows")]
+fn build_shell_command(cmd: &str) -> Command {
+    use std::os::windows::process::CommandExt;
+    let mut c = Command::new("cmd");
+    c.raw_arg("/S");
+    c.raw_arg("/C");
+    c.raw_arg(format!("\"{cmd}\""));
+    c
 }
